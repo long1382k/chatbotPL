@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Indexer tài liệu pháp lý → Qdrant</title>
+  <link href="https://cdn.jsdelivr.net/npm/jsoneditor@10.0.3/dist/jsoneditor.min.css" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <header class="top">
+    <h1>Luồng index tài liệu</h1>
+    <p class="sub">Upload .doc/.docx → phân tích cấu trúc → chỉnh sửa → tách đoạn → lưu <code>data/chunked</code> → Qdrant</p>
+  </header>
+
+  <nav class="steps">
+    <button type="button" class="step-tab active" data-step="1">1 · Nguồn</button>
+    <button type="button" class="step-tab" data-step="2">2 · Cấu trúc</button>
+    <button type="button" class="step-tab" data-step="3">3 · Chunk &amp; DB</button>
+  </nav>
+
+  <main>
+    <section id="step-1" class="panel active">
+      <h2>Bước 1 — Chọn tệp</h2>
+      <p class="hint">Chọn một hoặc nhiều tệp .doc / .docx, hoặc chọn cả thư mục (trình duyệt sẽ gửi mọi tệp con).</p>
+      <div class="row">
+        <label class="btn file">
+          Chọn tệp
+          <input type="file" id="files-input" accept=".doc,.docx,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document" multiple />
+        </label>
+        <label class="btn file secondary">
+          Chọn thư mục
+          <input type="file" id="folder-input" webkitdirectory multiple />
+        </label>
+      </div>
+      <p id="upload-status" class="status"></p>
+      <h3>Đã tải lên / lịch sử</h3>
+      <table class="files-table" id="registry-table">
+        <thead>
+          <tr>
+            <th>Chọn</th>
+            <th>Tên</th>
+            <th>Trạng thái</th>
+            <th>Chunked</th>
+            <th>Qdrant</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </section>
+
+    <section id="step-2" class="panel">
+      <h2>Bước 2 — Phân tích &amp; chuẩn hoá</h2>
+      <p class="hint">Chọn một dòng ở bước 1. Dùng cây JSON bên dưới để thêm / sửa / xoá nút (giống output <code>scripts/run_legal_parser.py</code> / <code>long_parser.parser</code>).</p>
+      <div class="row">
+        <button type="button" id="btn-parse" class="btn primary">Phân tích cấu trúc</button>
+        <button type="button" id="btn-load-type1" class="btn secondary">Tải JSON đã lưu</button>
+        <button type="button" id="btn-save-type1" class="btn">Lưu JSON cấu trúc</button>
+      </div>
+      <p id="step2-status" class="status"></p>
+      <div id="editor-type1" class="json-editor"></div>
+    </section>
+
+    <section id="step-3" class="panel">
+      <h2>Bước 3 — Tách đoạn &amp; Qdrant</h2>
+      <p class="hint">Tách theo Điều như <code>scripts/type1_to_retrieval_json.py</code>. Kiểm tra payload rồi lưu vào <code>data/chunked</code>.</p>
+      <div class="row">
+        <button type="button" id="btn-chunk" class="btn primary">Tách đoạn</button>
+        <button type="button" id="btn-save-chunked" class="btn">Lưu vào data/chunked</button>
+        <button type="button" id="btn-qdrant" class="btn warn">Nhập vào cơ sở dữ liệu</button>
+      </div>
+      <div class="row qdrant-opts">
+        <label>Qdrant URL <input type="text" id="qdrant-url" placeholder="http://localhost:6333" /></label>
+        <label>Collection <input type="text" id="qdrant-collection" value="legal_chunks" /></label>
+        <label class="inline"><input type="checkbox" id="qdrant-dry" /> Dry-run (chỉ mã hoá, không ghi)</label>
+      </div>
+      <p id="step3-status" class="status"></p>
+      <h3>Retrieval JSON (preview)</h3>
+      <div id="editor-retrieval" class="json-editor"></div>
+    </section>
+  </main>
+
+  <footer class="foot">
+    <span>Registry: <code>web_indexer/processed_registry.json</code></span>
+  </footer>
+
+  <script src="https://cdn.jsdelivr.net/npm/jsoneditor@10.0.3/dist/jsoneditor.min.js"></script>
+  <script src="/static/app.js"></script>
+</body>
+</html>

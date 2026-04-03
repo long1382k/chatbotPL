@@ -1,0 +1,25 @@
+{
+    "version": 1,
+    "semantic_query": "",
+    "filters": {
+        "document_id": null,
+        "issuing_agency": null,
+        "signer": null,
+        "issue_date": null,
+        "chunk_type": null,
+        "domains": null,
+        "chapter_number": null,
+        "chapter_title_contains": null,
+        "article_number": null
+    },
+    "notes": {
+        "document_id": "Exact match; e.g. 01.2025.tt-btc_20250115052759",
+        "issuing_agency": "Substring / regexp body; matched against payload issuing_agency",
+        "issue_date": "Exact dd/mm/yyyy as stored in payload",
+        "domains": "Array of strings; e.g. [\"law\"] — uses MatchAny on payload list",
+        "chapter_number": "Roman or arabic (1–399) normalized to Roman for metadata.hierarchy.chapter_number",
+        "article_number": "After vector search: post-filter on chunk_id (__dieu_{n}__) — needed because qdrant-client has no MatchRegexp",
+        "chapter_title_contains": "Post-filter on metadata.hierarchy.chapter_title (substring, case-insensitive)",
+        "chunk_type": "e.g. article — Qdrant MatchValue"
+    }
+}

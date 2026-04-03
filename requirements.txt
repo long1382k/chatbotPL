@@ -1,0 +1,4 @@
+# Minimal deps for parsing (scripts/run_legal_parser.py).
+# Retrieval + Qdrant: pip install -e ".[retrieve]"
+# Web UI: pip install -r requirements-web.txt   or   pip install -e ".[web]"
+python-docx>=1.0

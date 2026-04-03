@@ -1,0 +1,242 @@
+:root {
+  --bg: #0f1419;
+  --surface: #1a2332;
+  --border: #2d3a4d;
+  --text: #e6edf3;
+  --muted: #8b9cad;
+  --accent: #3d9eff;
+  --accent-dim: #2563a8;
+  --warn: #e8a035;
+  --danger: #f07178;
+  --ok: #7fd99a;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.5;
+  min-height: 100vh;
+}
+
+.top {
+  padding: 1.5rem 2rem 0.5rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.top h1 {
+  margin: 0 0 0.25rem;
+  font-weight: 600;
+  font-size: 1.35rem;
+}
+
+.sub {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.sub code {
+  color: var(--accent);
+  background: var(--surface);
+  padding: 0.1em 0.35em;
+  border-radius: 4px;
+}
+
+.steps {
+  display: flex;
+  gap: 0.5rem;
+  padding: 1rem 2rem;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+
+.step-tab {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  padding: 0.45rem 1rem;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+
+.step-tab:hover {
+  color: var(--text);
+  border-color: var(--accent-dim);
+}
+
+.step-tab.active {
+  background: var(--accent-dim);
+  color: #fff;
+  border-color: var(--accent);
+}
+
+main {
+  padding: 1.25rem 2rem 3rem;
+  max-width: 1280px;
+  margin: 0 auto;
+}
+
+.panel {
+  display: none;
+}
+
+.panel.active {
+  display: block;
+}
+
+.panel h2 {
+  margin-top: 0;
+  font-size: 1.1rem;
+}
+
+.panel h3 {
+  font-size: 0.95rem;
+  margin: 1.25rem 0 0.5rem;
+  color: var(--muted);
+}
+
+.hint {
+  color: var(--muted);
+  font-size: 0.88rem;
+  margin-bottom: 1rem;
+}
+
+.hint code {
+  color: var(--accent);
+}
+
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: center;
+  margin-bottom: 0.75rem;
+}
+
+.qdrant-opts {
+  margin-top: 0.5rem;
+}
+
+.qdrant-opts label {
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.qdrant-opts input[type="text"] {
+  margin-left: 0.35rem;
+  padding: 0.35rem 0.5rem;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  min-width: 180px;
+}
+
+.inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.btn {
+  display: inline-block;
+  padding: 0.5rem 1rem;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+  font-size: 0.88rem;
+}
+
+.btn:hover {
+  border-color: var(--accent-dim);
+}
+
+.btn.primary {
+  background: var(--accent-dim);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.btn.warn {
+  background: #5c4518;
+  border-color: var(--warn);
+  color: #fff;
+}
+
+.btn.secondary {
+  opacity: 0.9;
+}
+
+.file input {
+  display: none;
+}
+
+.status {
+  min-height: 1.25rem;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.status.err {
+  color: var(--danger);
+}
+
+.status.ok {
+  color: var(--ok);
+}
+
+.files-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+  margin-top: 0.5rem;
+}
+
+.files-table th,
+.files-table td {
+  border: 1px solid var(--border);
+  padding: 0.45rem 0.6rem;
+  text-align: left;
+}
+
+.files-table th {
+  background: var(--surface);
+  color: var(--muted);
+  font-weight: 500;
+}
+
+.files-table tr:hover td {
+  background: rgba(61, 158, 255, 0.06);
+}
+
+.json-editor {
+  height: 520px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+/* jsoneditor dark-ish tweaks */
+.json-editor .jsoneditor {
+  border: none;
+}
+
+.foot {
+  padding: 1rem 2rem;
+  border-top: 1px solid var(--border);
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.foot code {
+  color: var(--accent);
+}

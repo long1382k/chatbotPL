@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "semantic_query": "Nội dung Khoản 1 Luật sở hữu trí tuệ",
+  "filters": {
+    "document_id": null,
+    "issuing_agency": null,
+    "signer": null,
+    "issue_date": null,
+    "chunk_type": null,
+    "domains": null,
+    "chapter_number": null,
+    "chapter_title_contains": null,
+    "article_number": null
+  }
+}
