@@ -23,6 +23,8 @@ WEB_ROOT = Path(__file__).resolve().parent
 UPLOADS_DIR = WEB_ROOT / "uploads"
 WORKDIR = WEB_ROOT / "workdir"
 CHUNK_PREVIEW_TEMP_NAME = "chunk_preview_temp.json"
+# Kết quả «Phân tích cấu trúc» (chưa lưu chính thức); bản chính thức là type1.json sau «Lưu JSON cấu trúc».
+TYPE1_PREVIEW_NAME = "type1_preview.json"
 CHUNKED_DIR = ROOT / "data" / "chunked"
 CONVERTED_DIR = ROOT / "data" / "converted"
 REGISTRY_PATH = WEB_ROOT / "processed_registry.json"
@@ -67,6 +69,37 @@ def _find_item(registry: dict[str, Any], file_id: str) -> dict[str, Any] | None:
         if it.get("file_id") == file_id:
             return it
     return None
+
+
+def _resolve_type1_path(entry: dict[str, Any]) -> Path | None:
+    """Chỉ file type1.json đã lưu (không đọc type1_preview.json)."""
+    rel = entry.get("type1_rel_path")
+    if rel:
+        p = ROOT / rel
+        if p.is_file() and p.name == "type1.json":
+            return p
+    fid = entry.get("file_id") or ""
+    if fid:
+        p = _committed_type1_path(fid)
+        if p.is_file():
+            return p
+    return None
+
+
+def _committed_type1_path(file_id: str) -> Path:
+    return WORKDIR / file_id / "type1.json"
+
+
+def _type1_preview_path(file_id: str) -> Path:
+    return WORKDIR / file_id / TYPE1_PREVIEW_NAME
+
+
+def _has_committed_type1(entry: dict[str, Any]) -> bool:
+    """True chỉ khi đã có type1.json chính thức (đã «Lưu JSON cấu trúc»), không tính preview."""
+    fid = entry.get("file_id") or ""
+    if not fid:
+        return False
+    return _committed_type1_path(fid).is_file()
 
 
 def _apply_metadata_from_csv(result: dict[str, Any], stem: str, metadata: dict[str, dict[str, str]]) -> None:
@@ -174,7 +207,15 @@ async def index(request: Request) -> Any:
 
 @app.get("/api/registry")
 async def get_registry() -> JSONResponse:
-    return JSONResponse(_load_registry())
+    data = _load_registry()
+    out = dict(data)
+    enriched: list[dict[str, Any]] = []
+    for it in data.get("items", []):
+        row = dict(it)
+        row["has_type1_saved"] = _has_committed_type1(it)
+        enriched.append(row)
+    out["items"] = enriched
+    return JSONResponse(out)
 
 
 @app.post("/api/upload")
@@ -242,14 +283,12 @@ async def parse_file(file_id: str) -> JSONResponse:
     WORKDIR.mkdir(parents=True, exist_ok=True)
     wd = WORKDIR / file_id
     wd.mkdir(parents=True, exist_ok=True)
-    type1_path = wd / "type1.json"
-    with open(type1_path, "w", encoding="utf-8") as f:
+    preview_path = _type1_preview_path(file_id)
+    with open(preview_path, "w", encoding="utf-8") as f:
         json.dump(result, f, ensure_ascii=False, indent=2)
 
-    entry["parsed_at"] = _now_iso()
-    entry["type1_rel_path"] = str(type1_path.relative_to(ROOT))
+    # Chỉ ghi preview; «đã parse» + type1.json khi người dùng «Lưu JSON cấu trúc».
     entry["last_error"] = None
-    entry["document_id"] = Path(entry["original_filename"]).stem
     _save_registry(registry)
 
     return JSONResponse(result)
@@ -259,11 +298,11 @@ async def parse_file(file_id: str) -> JSONResponse:
 async def get_type1(file_id: str) -> JSONResponse:
     registry = _load_registry()
     entry = _find_item(registry, file_id)
-    if not entry or not entry.get("type1_rel_path"):
-        raise HTTPException(status_code=404, detail="Chưa phân tích hoặc không tồn tại")
-    p = ROOT / entry["type1_rel_path"]
-    if not p.is_file():
-        raise HTTPException(status_code=404, detail="type1.json không tìm thấy")
+    if not entry:
+        raise HTTPException(status_code=404, detail="Không tìm thấy file_id")
+    p = _resolve_type1_path(entry)
+    if not p:
+        raise HTTPException(status_code=404, detail="Chưa có JSON cấu trúc (type1.json)")
     with open(p, encoding="utf-8") as f:
         return JSONResponse(json.load(f))
 
@@ -278,11 +317,17 @@ async def put_type1(file_id: str, body: Type1SaveBody) -> JSONResponse:
     WORKDIR.mkdir(parents=True, exist_ok=True)
     wd = WORKDIR / file_id
     wd.mkdir(parents=True, exist_ok=True)
-    type1_path = wd / "type1.json"
+    type1_path = _committed_type1_path(file_id)
     with open(type1_path, "w", encoding="utf-8") as f:
         json.dump(body.data, f, ensure_ascii=False, indent=2)
 
+    preview_path = _type1_preview_path(file_id)
+    if preview_path.is_file():
+        preview_path.unlink()
+
     entry["type1_rel_path"] = str(type1_path.relative_to(ROOT))
+    entry["parsed_at"] = _now_iso()
+    entry["document_id"] = Path(entry["original_filename"]).stem
     entry["last_error"] = None
     _save_registry(registry)
     return JSONResponse({"ok": True, "path": str(type1_path.relative_to(ROOT))})

@@ -2,6 +2,8 @@
   const $ = (sel) => document.querySelector(sel);
 
   let selectedFileId = null;
+  /** Bản sao items từ /api/registry (có has_type1_saved). */
+  let registryItems = [];
   let type1Editor = null;
   let retrievalEditor = null;
   /** True sau khi bấm «Tạo tóm tắt» thành công; reset khi «Tách đoạn» lại. Quyết định collection Qdrant. */
@@ -63,9 +65,19 @@
     retrievalEditor = new je($("#editor-retrieval"), optsRetrieval, {});
   }
 
+  function updateLoadType1Button() {
+    const btn = $("#btn-load-type1");
+    if (!btn) return;
+    const item = registryItems.find((x) => x.file_id === selectedFileId);
+    const can = Boolean(selectedFileId && item && item.has_type1_saved);
+    btn.disabled = !can;
+  }
+
   async function refreshRegistry() {
     const r = await fetch("/api/registry");
     const data = await r.json();
+    registryItems = data.items || [];
+    updateLoadType1Button();
     const tbody = $("#registry-table tbody");
     tbody.innerHTML = "";
     for (const it of data.items || []) {
@@ -85,6 +97,7 @@
     tbody.querySelectorAll('input[name="pick"]').forEach((inp) => {
       inp.addEventListener("change", () => {
         selectedFileId = inp.value;
+        updateLoadType1Button();
       });
     });
     if (selectedFileId) {
@@ -139,7 +152,12 @@
       return;
     }
     type1Editor.set(j);
-    setStatus("#step2-status", "Phân tích xong. Chỉnh sửa cây bên dưới nếu cần.", "ok");
+    setStatus(
+      "#step2-status",
+      "Đã ghi bản tạm (preview). Chỉnh sửa cây rồi bấm «Lưu JSON cấu trúc» để lưu chính thức và đánh dấu đã parse.",
+      "ok",
+    );
+    await refreshRegistry();
   });
 
   $("#btn-save-type1").addEventListener("click", async () => {
@@ -165,6 +183,29 @@
       return;
     }
     setStatus("#step2-status", "Đã lưu: " + j.path, "ok");
+    await refreshRegistry();
+  });
+
+  $("#btn-load-type1").addEventListener("click", async () => {
+    if (!selectedFileId) {
+      setStatus("#step2-status", "Chọn tệp ở bước 1.", "err");
+      return;
+    }
+    const item = registryItems.find((x) => x.file_id === selectedFileId);
+    if (!item || !item.has_type1_saved) {
+      setStatus("#step2-status", "Chưa có file JSON cấu trúc đã lưu cho tệp này.", "err");
+      return;
+    }
+    setStatus("#step2-status", "Đang tải JSON đã lưu…");
+    const r = await fetch(`/api/type1/${selectedFileId}`);
+    const j = await r.json();
+    if (!r.ok) {
+      setStatus("#step2-status", j.detail || "Không đọc được type1.json", "err");
+      await refreshRegistry();
+      return;
+    }
+    type1Editor.set(j);
+    setStatus("#step2-status", "Đã nạp JSON cấu trúc từ file.", "ok");
   });
 
   $("#btn-chunk").addEventListener("click", async () => {

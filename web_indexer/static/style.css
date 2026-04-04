@@ -9,6 +9,11 @@
   --warn: #e8a035;
   --danger: #f07178;
   --ok: #7fd99a;
+  /* Trạng thái nút không dùng được — tách biệt rõ với nút bình thường */
+  --btn-disabled-bg: #121820;
+  --btn-disabled-border: #3d4f66;
+  --btn-disabled-text: #5c6d80;
+  --btn-disabled-pattern: rgba(91, 109, 128, 0.07);
 }
 
 * {
@@ -174,6 +179,68 @@ main {
 
 .btn.secondary {
   opacity: 0.9;
+}
+
+.btn:disabled {
+  cursor: not-allowed;
+  color: var(--btn-disabled-text);
+  background: var(--btn-disabled-bg);
+  border-color: var(--btn-disabled-border);
+  border-style: dashed;
+  box-shadow: none;
+  opacity: 1;
+}
+
+.btn:disabled:hover {
+  border-color: var(--btn-disabled-border);
+}
+
+/* «Nhập từ file» — tắt: trông giống ô «chưa khả dụng», không lẫn với nút thường */
+.btn-load-type1:disabled {
+  pointer-events: none;
+  color: var(--btn-disabled-text) !important;
+  background-color: var(--btn-disabled-bg) !important;
+  background-image: repeating-linear-gradient(
+    -45deg,
+    transparent,
+    transparent 5px,
+    var(--btn-disabled-pattern) 5px,
+    var(--btn-disabled-pattern) 6px
+  ) !important;
+  border: 1px dashed var(--btn-disabled-border) !important;
+  border-radius: 6px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  filter: grayscale(0.5);
+  opacity: 1 !important;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+}
+
+.btn-load-type1:disabled:hover {
+  border-color: var(--btn-disabled-border) !important;
+}
+
+/* «Nhập từ file» — bật: nổi bật so với bản tắt */
+.btn-load-type1:not(:disabled) {
+  pointer-events: auto;
+  filter: none;
+  border: 2px solid var(--accent);
+  color: #eaf4ff;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  background: linear-gradient(165deg, rgba(61, 158, 255, 0.28) 0%, rgba(37, 99, 168, 0.35) 100%);
+  box-shadow:
+    0 0 0 1px rgba(61, 158, 255, 0.35),
+    0 2px 12px rgba(61, 158, 255, 0.18);
+}
+
+.btn-load-type1:not(:disabled):hover {
+  border-color: #5eb0ff;
+  background: linear-gradient(165deg, rgba(94, 176, 255, 0.35) 0%, rgba(45, 115, 190, 0.45) 100%);
+  color: #fff;
+  box-shadow:
+    0 0 0 1px rgba(94, 176, 255, 0.45),
+    0 4px 18px rgba(61, 158, 255, 0.28);
 }
 
 .file input {

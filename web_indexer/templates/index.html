@@ -15,8 +15,8 @@
 
   <nav class="steps">
     <button type="button" class="step-tab active" data-step="1">1 · Nguồn</button>
-    <button type="button" class="step-tab" data-step="2">2 · Cấu trúc</button>
-    <button type="button" class="step-tab" data-step="3">3 · Chunk &amp; DB</button>
+    <button type="button" class="step-tab" data-step="2">2 · Tách cấu trúc</button>
+    <button type="button" class="step-tab" data-step="3">3 · Phân đoạn</button>
   </nav>
 
   <main>
@@ -51,9 +51,10 @@
 
     <section id="step-2" class="panel">
       <h2>Bước 2 — Phân tích &amp; chuẩn hoá</h2>
-      <p class="hint">Chọn một dòng ở bước 1. Dùng cây JSON bên dưới để thêm / sửa / xoá nút (giống output <code>scripts/run_legal_parser.py</code> / <code>long_parser.parser</code>).</p>
+      <p class="hint">Chọn một dòng ở bước 1. «Phân tích cấu trúc» chỉ ghi bản tạm <code>workdir/&lt;id&gt;/type1_preview.json</code> để xem và sửa; bảng bước 1 vẫn <strong>chưa parse</strong> cho đến khi bạn «Lưu JSON cấu trúc» (khi đó ghi <code>type1.json</code> và trạng thái thành đã parse). «Nhập từ file» chỉ bật khi đã có <code>type1.json</code> đã lưu.</p>
       <div class="row">
         <button type="button" id="btn-parse" class="btn primary">Phân tích cấu trúc</button>
+        <button type="button" id="btn-load-type1" class="btn btn-load-type1" disabled>Nhập từ file</button>
         <button type="button" id="btn-save-type1" class="btn">Lưu JSON cấu trúc</button>
       </div>
       <p id="step2-status" class="status"></p>
