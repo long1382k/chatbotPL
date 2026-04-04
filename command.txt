@@ -1,0 +1,19 @@
+Điều kiện chung đối với sáng chế được bảo hộ
+
+export QDRANT_URL=http://localhost:6333
+
+python3 scripts/legal_retrieve.py \
+  "Điều kiện chung đối với sáng chế được bảo hộ" \
+  --collection legal_chunks_dual \
+  --vectors-mode dual \
+  --search-target both \
+  --top-k 8
+
+
+  python scripts/legal_rag.py \
+  "Điều kiện chung đối với sáng chế được bảo hộ là gì?" \
+  --top-k 10 \
+  --ollama-model qwen2.5:7b-instruct
+
+  Chạy web:
+  python -m uvicorn app:app --host 127.0.0.1 --port 8765 --reload

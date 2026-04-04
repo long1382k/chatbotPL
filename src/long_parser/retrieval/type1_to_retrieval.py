@@ -170,6 +170,7 @@ def type1_to_retrieval(
                 "content": {
                     "search_text": build_search_text(doc_title, chapter, return_text),
                     "return_text": return_text,
+                    "summary": "",
                 },
                 "chunk_type": "article",
                 "metadata": {

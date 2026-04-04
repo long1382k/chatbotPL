@@ -34,6 +34,11 @@ except ImportError:
 
 DEFAULT_MODEL = "bkai-foundation-models/vietnamese-bi-encoder"
 
+# Must match embed_qdrant_chunks.DUAL_VECTOR_*
+DUAL_VECTOR_SEARCH = "dense_search"
+DUAL_VECTOR_SUMMARY = "dense_summary"
+RRF_K = 60
+
 # --- Roman numerals for chapter normalization (payload uses I, II, III, …) ---
 
 _ROMAN_LETTERS = (
@@ -295,6 +300,130 @@ def _post_filter_chunks(chunks: list[dict[str, Any]], filters: dict[str, Any]) -
     return out
 
 
+def _normalize_hits(hits: Any) -> list[dict[str, Any]]:
+    """Qdrant ScoredPoint or legacy search record → {id, score, payload}."""
+    out: list[dict[str, Any]] = []
+    for h in hits or []:
+        if isinstance(h, dict):
+            pl = h.get("payload") or {}
+            hid = str(h.get("id", ""))
+            sc = float(h.get("score", 0.0))
+        else:
+            pl = getattr(h, "payload", None) or {}
+            hid = str(getattr(h, "id", ""))
+            sc = float(getattr(h, "score", 0.0))
+        if not isinstance(pl, dict):
+            pl = dict(pl) if pl else {}
+        out.append({"id": hid, "score": sc, "payload": pl})
+    return out
+
+
+def _vector_search(
+    client: Any,
+    *,
+    collection: str,
+    query_vector: list[float],
+    using: str,
+    query_filter: Any,
+    limit: int,
+) -> list[dict[str, Any]]:
+    if hasattr(client, "query_points"):
+        resp = client.query_points(
+            collection_name=collection,
+            query=query_vector,
+            using=using,
+            query_filter=query_filter,
+            limit=limit,
+            with_payload=True,
+        )
+        return _normalize_hits(resp.points)
+    raw = client.search(
+        collection_name=collection,
+        query_vector=(using, query_vector),
+        query_filter=query_filter,
+        limit=limit,
+        with_payload=True,
+    )
+    return _normalize_hits(raw)
+
+
+def _safe_vector_search(
+    client: Any,
+    *,
+    collection: str,
+    query_vector: list[float],
+    using: str,
+    query_filter: Any,
+    limit: int,
+) -> list[dict[str, Any]]:
+    """
+    Wrapper around vector search that turns "Not existing vector name" errors into empty results.
+    This avoids hard failures when the collection layout (legacy vs dual) doesn't match defaults.
+    """
+    try:
+        return _vector_search(
+            client,
+            collection=collection,
+            query_vector=query_vector,
+            using=using,
+            query_filter=query_filter,
+            limit=limit,
+        )
+    except Exception as e:
+        msg = str(e).lower()
+        if "not existing vector name" in msg or "dense_summary" in msg or "dense_search" in msg:
+            return []
+        raise
+
+
+def reciprocal_rank_fusion(
+    ranked_lists: list[list[dict[str, Any]]],
+    *,
+    k: int = RRF_K,
+) -> list[dict[str, Any]]:
+    """Merge ranked hit lists by RRF; output sorted by fused score (desc)."""
+    scores: dict[str, float] = {}
+    best: dict[str, dict[str, Any]] = {}
+    for lst in ranked_lists:
+        for rank, h in enumerate(lst, start=1):
+            pid = h["id"]
+            scores[pid] = scores.get(pid, 0.0) + 1.0 / (k + rank)
+            best.setdefault(pid, h)
+    ordered = sorted(scores.keys(), key=lambda x: scores[x], reverse=True)
+    return [
+        {
+            "id": oid,
+            "score": scores[oid],
+            "payload": best[oid]["payload"],
+        }
+        for oid in ordered
+    ]
+
+
+def _hits_to_chunks(hits: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    chunks: list[dict[str, Any]] = []
+    for h in hits:
+        pl = h.get("payload") or {}
+        chunks.append(
+            {
+                "score": float(h["score"]),
+                "id": h["id"],
+                "chunk_id": pl.get("chunk_id"),
+                "document_id": pl.get("document_id"),
+                "title": pl.get("title"),
+                "chunk_type": pl.get("chunk_type"),
+                "issue_date": pl.get("issue_date"),
+                "issuing_agency": pl.get("issuing_agency"),
+                "return_text": pl.get("return_text"),
+                "search_text": pl.get("search_text"),
+                "summary": pl.get("summary"),
+                "metadata": pl.get("metadata"),
+                "source_file": pl.get("source_file"),
+            }
+        )
+    return chunks
+
+
 class LegalRetriever:
     def __init__(
         self,
@@ -302,6 +431,9 @@ class LegalRetriever:
         qdrant_url: str = "http://localhost:6333",
         collection: str = "legal_chunks",
         vector_name: str = "dense",
+        vectors_mode: str = "dual",
+        vector_search: str = DUAL_VECTOR_SEARCH,
+        vector_summary: str = DUAL_VECTOR_SUMMARY,
         model_name: str = DEFAULT_MODEL,
     ) -> None:
         if QdrantClient is None or SentenceTransformer is None:
@@ -309,7 +441,61 @@ class LegalRetriever:
         self._client = QdrantClient(url=qdrant_url)
         self.collection = collection
         self.vector_name = vector_name
+        self.vectors_mode = vectors_mode
+        self.vector_search = vector_search
+        self.vector_summary = vector_summary
         self.model = SentenceTransformer(model_name)
+        self._collection_vector_names = self._fetch_collection_vector_names()
+
+    def _fetch_collection_vector_names(self) -> set[str]:
+        """
+        Best-effort detection of named vectors in the current collection.
+
+        This lets us avoid "Not existing vector name error" when the collection
+        was embedded in legacy mode but retrieval defaults to dual mode.
+        """
+        try:
+            col = self._client.get_collection(self.collection)
+        except Exception:
+            return set()
+
+        vectors_spec = getattr(col, "vectors", None) or getattr(col, "payload", None)
+        if vectors_spec is None:
+            return set()
+
+        # Newer qdrant-client: col.vectors is typically a dict-like named vectors config.
+        if isinstance(vectors_spec, dict):
+            return {str(k) for k in vectors_spec.keys()}
+
+        # Sometimes it's a pydantic model with .__dict__ that contains named vectors.
+        if hasattr(vectors_spec, "__dict__"):
+            d = vectors_spec.__dict__
+            # try common key names
+            for key in ("vectors", "config", "named_vectors", "vectors_config"):
+                val = d.get(key)
+                if isinstance(val, dict):
+                    return {str(k) for k in val.keys()}
+
+        return set()
+
+    def _vector_exists(self, name: str) -> bool:
+        if not self._collection_vector_names:
+            # If detection failed, be conservative and assume names exist
+            # (legacy will be handled by searching with vector_name "dense" as fallback).
+            return True
+        return name in self._collection_vector_names
+
+    def _choose_using_for_search_text(self) -> str:
+        # Dual preferred: dense_search, else legacy: dense
+        if self._vector_exists(self.vector_search):
+            return self.vector_search
+        return self.vector_name
+
+    def _choose_using_for_summary(self) -> str:
+        # Dual preferred: dense_summary, else legacy: dense
+        if self._vector_exists(self.vector_summary):
+            return self.vector_summary
+        return self.vector_name
 
     def embed(self, text: str) -> list[float]:
         v = self.model.encode(
@@ -325,11 +511,19 @@ class LegalRetriever:
         *,
         top_k: int = 10,
         filter_json: Optional[dict[str, Any]] = None,
+        search_target: str = "search_text",
     ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
         """
         Returns (ranked chunks, debug bundle with semantic_query, filters, qdrant_filter).
-        If ``filter_json`` is provided it must follow the template (semantic_query + filters);
-        otherwise extraction runs on ``query``.
+
+        ``search_target`` (after metadata filter + post-filter):
+
+        - ``search_text``: cosine vs ``dense`` (legacy) or ``dense_search`` (dual collection).
+        - ``summary``: vs ``dense_summary`` (dual only; same query embedding compared to summary vectors).
+        - ``both``: RRF fusion over separate searches on ``dense_search`` and ``dense_summary`` (dual only).
+
+        Legacy collections (single vector ``dense``) should use ``search_target=search_text``
+        and ``vectors_mode=legacy``.
         """
         if filter_json:
             semantic = (filter_json.get("semantic_query") or query).strip()
@@ -346,46 +540,103 @@ class LegalRetriever:
         search_limit = top_k
         if _needs_post_filter(filters):
             search_limit = max(top_k * 10, 50)
+        if search_target == "both":
+            search_limit = max(search_limit * 2, top_k * 5)
 
-        if hasattr(self._client, "query_points"):
-            resp = self._client.query_points(
-                collection_name=self.collection,
-                query=vec,
-                using=self.vector_name,
+        dual = self.vectors_mode == "dual"
+        if search_target in ("summary", "both") and not dual:
+            raise ValueError(
+                "search_target=%r requires a dual-vector collection (embed with --vectors dual). "
+                "Use search_target='search_text' for legacy single-vector indexes."
+                % (search_target,)
+            )
+
+        if search_target == "search_text":
+            using = self._choose_using_for_search_text() if dual else self.vector_name
+            hits = _safe_vector_search(
+                self._client,
+                collection=self.collection,
+                query_vector=vec,
+                using=using,
                 query_filter=qf,
                 limit=search_limit,
-                with_payload=True,
             )
-            hits = resp.points
+            if not hits and dual and self.vector_name != using:
+                hits = _safe_vector_search(
+                    self._client,
+                    collection=self.collection,
+                    query_vector=vec,
+                    using=self.vector_name,
+                    query_filter=qf,
+                    limit=search_limit,
+                )
+        elif search_target == "summary":
+            using = self._choose_using_for_summary() if dual else self.vector_name
+            hits = _safe_vector_search(
+                self._client,
+                collection=self.collection,
+                query_vector=vec,
+                using=using,
+                query_filter=qf,
+                limit=search_limit,
+            )
+            if not hits and dual and self.vector_name != using:
+                hits = _safe_vector_search(
+                    self._client,
+                    collection=self.collection,
+                    query_vector=vec,
+                    using=self.vector_name,
+                    query_filter=qf,
+                    limit=search_limit,
+                )
         else:
-            hits = self._client.search(
-                collection_name=self.collection,
-                query_vector=(self.vector_name, vec),
-                query_filter=qf,
-                limit=search_limit,
-                with_payload=True,
-            )
+            # If one of the dual vectors is missing, just search the available ones
+            # and avoid querying a non-existing vector name.
+            ranked_lists: list[list[dict[str, Any]]] = []
+            using_s = self._choose_using_for_search_text() if dual else self.vector_name
+            using_m = self._choose_using_for_summary() if dual else self.vector_name
 
-        chunks: list[dict[str, Any]] = []
-        for h in hits:
-            pl = h.payload or {}
-            chunks.append(
-                {
-                    "score": float(h.score),
-                    "id": str(h.id),
-                    "chunk_id": pl.get("chunk_id"),
-                    "document_id": pl.get("document_id"),
-                    "title": pl.get("title"),
-                    "chunk_type": pl.get("chunk_type"),
-                    "issue_date": pl.get("issue_date"),
-                    "issuing_agency": pl.get("issuing_agency"),
-                    "return_text": pl.get("return_text"),
-                    "search_text": pl.get("search_text"),
-                    "metadata": pl.get("metadata"),
-                    "source_file": pl.get("source_file"),
-                }
-            )
+            if using_s:
+                lst = _safe_vector_search(
+                    self._client,
+                    collection=self.collection,
+                    query_vector=vec,
+                    using=using_s,
+                    query_filter=qf,
+                    limit=search_limit,
+                )
+                if lst:
+                    ranked_lists.append(lst)
+            # If using_m resolves to the same named vector as using_s (e.g., legacy fallback),
+            # avoid duplicate identical searches.
+            if using_m and using_m != using_s:
+                lst = _safe_vector_search(
+                    self._client,
+                    collection=self.collection,
+                    query_vector=vec,
+                    using=using_m,
+                    query_filter=qf,
+                    limit=search_limit,
+                )
+                if lst:
+                    ranked_lists.append(lst)
 
+            if len(ranked_lists) == 1:
+                hits = ranked_lists[0]
+            else:
+                if not ranked_lists:
+                    hits = _safe_vector_search(
+                        self._client,
+                        collection=self.collection,
+                        query_vector=vec,
+                        using=self.vector_name,
+                        query_filter=qf,
+                        limit=search_limit,
+                    )
+                else:
+                    hits = reciprocal_rank_fusion(ranked_lists, k=RRF_K)
+
+        chunks = _hits_to_chunks(hits)
         chunks = _post_filter_chunks(chunks, filters)
         chunks = chunks[:top_k]
 
@@ -398,6 +649,8 @@ class LegalRetriever:
             "qdrant_filter": qf_dump,
             "search_limit": search_limit,
             "post_filter_applied": _needs_post_filter(filters),
+            "search_target": search_target,
+            "vectors_mode": self.vectors_mode,
         }
         return chunks, debug
 
@@ -407,8 +660,20 @@ def main() -> None:
     ap.add_argument("query", nargs="?", default="", help="User question")
     ap.add_argument("--top-k", type=int, default=8)
     ap.add_argument("--qdrant-url", default=os.environ.get("QDRANT_URL", "http://localhost:6333"))
-    ap.add_argument("--collection", default="legal_chunks")
-    ap.add_argument("--vector-name", default="dense")
+    ap.add_argument("--collection", default="legal_chunks_dual")
+    ap.add_argument("--vector-name", default="dense", help="Legacy single-vector collection name")
+    ap.add_argument(
+        "--vectors-mode",
+        choices=("legacy", "dual"),
+        default="dual",
+        help="Must match how the Qdrant collection was built (embed --vectors …)",
+    )
+    ap.add_argument(
+        "--search-target",
+        choices=("search_text", "summary", "both"),
+        default="both",
+        help="Which embedding(s) to query: full search_text, summary only, or RRF fusion of both",
+    )
     ap.add_argument("--model", default=DEFAULT_MODEL)
     ap.add_argument(
         "--filter-json",
@@ -435,6 +700,7 @@ def main() -> None:
         qdrant_url=args.qdrant_url,
         collection=args.collection,
         vector_name=args.vector_name,
+        vectors_mode=args.vectors_mode,
         model_name=args.model,
     )
     query_text = args.query or (filter_override or {}).get("semantic_query", "")
@@ -442,6 +708,7 @@ def main() -> None:
         query_text,
         top_k=args.top_k,
         filter_json=filter_override,
+        search_target=args.search_target,
     )
 
     if args.dump_filter:

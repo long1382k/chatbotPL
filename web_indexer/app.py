@@ -22,6 +22,7 @@ SRC_DIR = ROOT / "src"
 WEB_ROOT = Path(__file__).resolve().parent
 UPLOADS_DIR = WEB_ROOT / "uploads"
 WORKDIR = WEB_ROOT / "workdir"
+CHUNK_PREVIEW_TEMP_NAME = "chunk_preview_temp.json"
 CHUNKED_DIR = ROOT / "data" / "chunked"
 CONVERTED_DIR = ROOT / "data" / "converted"
 REGISTRY_PATH = WEB_ROOT / "processed_registry.json"
@@ -80,6 +81,16 @@ def _apply_metadata_from_csv(result: dict[str, Any], stem: str, metadata: dict[s
     result["signer"] = meta.get("Người ký", "") or result.get("signer", "")
 
 
+def _chunk_preview_temp_path(file_id: str) -> Path:
+    return WORKDIR / file_id / CHUNK_PREVIEW_TEMP_NAME
+
+
+def _remove_chunk_preview_temp(file_id: str) -> None:
+    p = _chunk_preview_temp_path(file_id)
+    if p.is_file():
+        p.unlink()
+
+
 def _safe_filename(name: str) -> str:
     base = os.path.basename(name)
     return re.sub(r"[^\w.\- \u00C0-\u1FFF()]+", "_", base)[:200] or "file"
@@ -121,19 +132,34 @@ class Type1SaveBody(BaseModel):
 class RetrievalPreviewBody(BaseModel):
     type1: dict[str, Any]
     document_id: str | None = None
+    file_id: str | None = None  # nếu có: xoá file tạm preview (tóm tắt) khi tách đoạn lại
 
 
 class ChunkedSaveBody(BaseModel):
-    retrieval: dict[str, Any]
+    # from_temp=True: đọc workdir/<file_id>/chunk_preview_temp.json (sau «Tạo tóm tắt», preview chưa sửa).
     file_id: str
+    from_temp: bool = False
+    retrieval: dict[str, Any] | None = None
+
+
+class SummarizeBody(BaseModel):
+    """Sau tóm tắt: ghi file tạm + trả JSON cho preview."""
+
+    file_id: str
+    retrieval: dict[str, Any]
 
 
 class QdrantBody(BaseModel):
     file_id: str | None = None
     retrieval: dict[str, Any] | None = None
-    collection: str = "legal_chunks"
     qdrant_url: str | None = None
-    dry_run: bool = False
+    # True nếu người dùng đã bấm «Tạo tóm tắt» trong phiên → collection dual; ngược lại → legacy.
+    use_dual: bool = False
+
+
+# Tên collection cố định (không nhập tay trên UI).
+QDRANT_COLLECTION_LEGACY = "legal_chunks"
+QDRANT_COLLECTION_DUAL = "legal_chunks_dual"
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -279,7 +305,50 @@ async def retrieval_preview(body: RetrievalPreviewBody) -> JSONResponse:
         )
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
+    if body.file_id:
+        _remove_chunk_preview_temp(body.file_id)
     return JSONResponse(out)
+
+
+@app.post("/api/retrieval/summarize")
+async def retrieval_summarize(body: SummarizeBody) -> JSONResponse:
+    registry = _load_registry()
+    entry = _find_item(registry, body.file_id)
+    if not entry:
+        raise HTTPException(status_code=404, detail="Không tìm thấy file_id")
+
+    doc = body.retrieval
+    chunks = doc.get("children_chunks") or []
+    if not isinstance(chunks, list) or not chunks:
+        raise HTTPException(
+            status_code=400,
+            detail="Không có children_chunks; hãy «Tách đoạn» trước.",
+        )
+    try:
+        from long_parser.summarization.ollama_chunk_summarizer import ensure_chunk_summaries
+    except ImportError as e:
+        raise HTTPException(status_code=500, detail=f"Thiếu module summarization: {e}") from e
+    try:
+        ensure_chunk_summaries(
+            doc,
+            force=False,
+            delay_s=0.15,
+            max_input_chars=int(os.environ.get("SUMMARY_MAX_INPUT_CHARS", "24000")),
+            timeout=int(os.environ.get("SUMMARY_TIMEOUT_S", "180")),
+            temperature=float(os.environ.get("SUMMARY_TEMPERATURE", "0.2")),
+            max_tokens=int(os.environ.get("SUMMARY_MAX_TOKENS", "256")),
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Không tạo được tóm tắt: {e}") from e
+
+    WORKDIR.mkdir(parents=True, exist_ok=True)
+    wd = WORKDIR / body.file_id
+    wd.mkdir(parents=True, exist_ok=True)
+    temp_path = _chunk_preview_temp_path(body.file_id)
+    with open(temp_path, "w", encoding="utf-8") as f:
+        json.dump(doc, f, ensure_ascii=False, indent=2)
+
+    return JSONResponse(doc)
 
 
 @app.post("/api/chunked/save")
@@ -289,14 +358,33 @@ async def save_chunked(body: ChunkedSaveBody) -> JSONResponse:
     if not entry:
         raise HTTPException(status_code=404, detail="Không tìm thấy file_id")
 
-    doc_id = (body.retrieval.get("document_id") or "").strip()
+    if body.from_temp:
+        temp_path = _chunk_preview_temp_path(body.file_id)
+        if not temp_path.is_file():
+            raise HTTPException(
+                status_code=400,
+                detail="Không có file tạm (chunk_preview_temp.json). Hãy «Tạo tóm tắt» trước, hoặc lưu bằng JSON trong preview (đã chỉnh sửa).",
+            )
+        with open(temp_path, encoding="utf-8") as f:
+            retrieval: dict[str, Any] = json.load(f)
+    else:
+        if not body.retrieval:
+            raise HTTPException(
+                status_code=400,
+                detail="Thiếu retrieval hoặc dùng from_temp=true sau «Tạo tóm tắt» (khi chưa sửa preview).",
+            )
+        retrieval = body.retrieval
+
+    doc_id = (retrieval.get("document_id") or "").strip()
     if not doc_id:
         raise HTTPException(status_code=400, detail="retrieval thiếu document_id")
 
     CHUNKED_DIR.mkdir(parents=True, exist_ok=True)
     out_path = CHUNKED_DIR / f"{doc_id}.json"
     with open(out_path, "w", encoding="utf-8") as f:
-        json.dump(body.retrieval, f, ensure_ascii=False, indent=2)
+        json.dump(retrieval, f, ensure_ascii=False, indent=2)
+
+    _remove_chunk_preview_temp(body.file_id)
 
     rel = str(out_path.relative_to(ROOT))
     entry["chunked_rel_path"] = rel
@@ -304,12 +392,14 @@ async def save_chunked(body: ChunkedSaveBody) -> JSONResponse:
     entry["last_error"] = None
     _save_registry(registry)
 
-    return JSONResponse({"ok": True, "path": rel})
+    return JSONResponse({"ok": True, "path": rel, "from_temp": body.from_temp})
 
 
 @app.post("/api/qdrant")
 async def qdrant_upsert(body: QdrantBody) -> JSONResponse:
     doc: dict[str, Any] | None = body.retrieval
+    use_dual = bool(body.use_dual)
+    collection = QDRANT_COLLECTION_DUAL if use_dual else QDRANT_COLLECTION_LEGACY
     if doc is None and body.file_id:
         registry = _load_registry()
         entry = _find_item(registry, body.file_id)
@@ -335,8 +425,9 @@ async def qdrant_upsert(body: QdrantBody) -> JSONResponse:
         n = upsert_retrieval_document(
             doc,
             qdrant_url=body.qdrant_url,
-            collection=body.collection,
-            dry_run=body.dry_run,
+            collection=collection,
+            vectors_mode="dual" if use_dual else "legacy",
+            dry_run=False,
         )
     except Exception as e:
         if body.file_id:
@@ -353,10 +444,19 @@ async def qdrant_upsert(body: QdrantBody) -> JSONResponse:
         if ent:
             ent["qdrant_imported_at"] = _now_iso()
             ent["qdrant_points"] = n
+            ent["qdrant_collection"] = collection
+            ent["qdrant_vectors_mode"] = "dual" if use_dual else "legacy"
             ent["last_error"] = None
             _save_registry(registry)
 
-    return JSONResponse({"ok": True, "points": n, "dry_run": body.dry_run})
+    return JSONResponse(
+        {
+            "ok": True,
+            "points": n,
+            "collection": collection,
+            "vectors_mode": "dual" if use_dual else "legacy",
+        }
+    )
 
 
 if __name__ == "__main__":

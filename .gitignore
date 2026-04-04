@@ -6,6 +6,7 @@ dist/
 build/
 /data/
 /artifacts/
+/converted/
 # Local / generated data (uncomment if you do not commit these)
 # data/converted/
 # web_indexer/uploads/

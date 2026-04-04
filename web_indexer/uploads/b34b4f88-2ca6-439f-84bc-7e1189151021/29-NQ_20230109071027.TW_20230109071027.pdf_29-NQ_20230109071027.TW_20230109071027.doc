@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en" dir=>
+<head>
+    <meta charset="utf-8" />
+    <title>Order</title>
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta content="width=device-width, initial-scale=1.0" name="viewport" />
+    <meta http-equiv="Content-type" content="text/html; charset=utf-8" />
+    <meta content="Order" name="description" />
+    <meta content="Order" name="keywords" />
+    <meta content="Order" name="author" />
+    <link rel="shortcut icon" href="/favicon.ico" />
+    <link rel="stylesheet" abp-href="/view-resources/Areas/Admin/Views/_Bundles/vendors.bundle.css" href="/view-resources/Areas/Admin/Views/_Bundles/vendors.bundle.min.css?v=8c9Fuj1YVynNdP7NDQ2ZjJm8L7XULJnvxeZjJF8s7pQ" />
+    <link rel="stylesheet" href="/metronic/dist/html/default/assets/demo/default/base/style.bundle.css?v=4xewin4SLEnpo5TANN51RIbWhuLCxT4NnJKbJRlfwbs&amp;v=4xewin4SLEnpo5TANN51RIbWhuLCxT4NnJKbJRlfwbs" />
+    <link rel="stylesheet" abp-href="/view-resources/Areas/Admin/Views/_Bundles/common-styles.css" href="/view-resources/Areas/Admin/Views/_Bundles/common-styles.min.css?v=7dw5yoiW3_-doFj08rL_7ISyYhAE4joeYfZc0uY0Mt4" />
+    <style>
+        *:not(i):not(.close):not(.fa) {
+            font-family: sans-serif !important;
+        }
+    </style>
+    <script type="text/javascript">
+        var abp = abp || {}; abp.appPath = '/';
+    </script>
+</head>
+<body class="m--skin- m-header--fixed m-header--fixed-mobile m-aside-left--enabled m-aside-left--skin-dark m-aside-left--offcanvas m-footer--push m-aside--offcanvas-default">
+    <div class="m-grid m-grid--hor m-grid--root m-page">
+        <div class="m-grid__item m-grid__item--fluid m-grid  m-error-5" style="background-image: url(/metronic/src/media/app/img/error/bg5.jpg);">
+            <div class="m-error_container">
+    <span class="m-error_title">
+        <h1>
+            404
+        </h1>
+    </span>
+    <p class="m-error_subtitle">
+        R&#x1EA5;t ti&#x1EBF;c! B&#x1EA1;n thua r&#x1ED3;i.
+    </p>
+    <p class="m-error_description">
+        Ch&#xFA;ng t&#xF4;i kh&#xF4;ng th&#x1EC3; t&#xEC;m th&#x1EA5;y trang b&#x1EA1;n &#x111;ang t&#xEC;m ki&#x1EBF;m.<br>
+        <a href="/" class="link">Trang ch&#x1EE7;</a>.
+    </p>
+</div>
+        </div>
+    </div>
+
+    <script abp-src="/view-resources/Areas/Admin/Views/_Bundles/account-layout-libs.js" src="/view-resources/Areas/Admin/Views/_Bundles/account-layout-libs.min.js?v=eDGnBLTSCtCO_3pOvlW9gDQJs-vxt6sSMeYWr8QgHjw"></script>
+
+    <script type="text/javascript">
+        abp.localization.defaultSourceName = 'Order';
+    </script>
+
+    <!-- Dynamic scripts of ABP system (They are created on runtime and can not be bundled) -->
+    <script src="/AbpScripts/GetScripts?v=638924940659624888" type="text/javascript"></script>
+</body>
+
+</html>

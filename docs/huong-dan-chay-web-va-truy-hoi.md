@@ -101,8 +101,8 @@ Mặc định ứng dụng: **`http://127.0.0.1:8765`**.
 1. **Upload** một hoặc nhiều file `.doc` / `.docx`.
 2. **Phân tích (parse)** từng dòng — sinh `type1.json` trong `web_indexer/workdir/<file_id>/`.
 3. **Chỉnh sửa** cây JSON nếu cần (tiêu đề văn bản, cấu trúc).
-4. **Xem retrieval** (preview chunk theo Điều), rồi **Lưu vào `data/chunked`**.
-5. **Đẩy Qdrant**: nhập URL collection (mặc định thường khớp code: collection `legal_chunks`), có thể **dry-run** trước để chỉ kiểm tra embed không ghi DB.
+4. **Tách đoạn** để xem retrieval (preview). Tùy chọn: **Tạo tóm tắt** (Ollama) → server ghi bản có `content.summary` vào file tạm `web_indexer/workdir/<file_id>/chunk_preview_temp.json` và cập nhật preview.
+5. **Lưu vào `data/chunked`** (bản chính thức; nếu không sửa preview sau tóm tắt thì server copy từ file tạm). Sau đó **Đẩy Qdrant**. Collection ngầm: đã tóm tắt trong phiên → **`legal_chunks_dual`**; chỉ tách đoạn → **`legal_chunks`**.
 
 ### 5.3 Lỗi thường gặp
 
@@ -126,7 +126,10 @@ python3 scripts/embed_qdrant_chunks.py artifacts/retrieval/ten-van-ban.json
 
 Tùy chọn: `--collection`, `--qdrant-url`, `--dry-run` (chỉ encode, không upsert).
 
-Collection và tên vector mặc định trong code: **`legal_chunks`**, vector **`dense`** — cần **giống** khi truy hồi.
+Collection và tên vector mặc định:
+- Dual (có summary): collection **`legal_chunks_dual`**, vectors **`dense_search`** + **`dense_summary`**
+- Legacy (không summary): collection **`legal_chunks`**, vector **`dense`**
+=> cần **giống** khi truy hồi.
 
 ---
 

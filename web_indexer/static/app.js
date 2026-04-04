@@ -4,6 +4,13 @@
   let selectedFileId = null;
   let type1Editor = null;
   let retrievalEditor = null;
+  /** True sau khi bấm «Tạo tóm tắt» thành công; reset khi «Tách đoạn» lại. Quyết định collection Qdrant. */
+  let retrievalPreviewUsedSummarize = false;
+  /** Server đã ghi chunk_preview_temp.json (sau tóm tắt). */
+  let hasChunkTemp = false;
+  /** Người dùng sửa preview sau tóm tắt → lưu phải gửi JSON, không dùng from_temp. */
+  let retrievalTempOutdated = false;
+  let suppressRetrievalChange = false;
 
   const optsType1 = {
     mode: "tree",
@@ -21,6 +28,10 @@
     mainMenuBar: true,
     navigationBar: true,
     statusBar: true,
+    onChange: () => {
+      if (suppressRetrievalChange) return;
+      if (hasChunkTemp) retrievalTempOutdated = true;
+    },
   };
 
   function setStatus(el, msg, kind) {
@@ -115,22 +126,6 @@
   $("#files-input").addEventListener("change", (e) => uploadList(e.target.files));
   $("#folder-input").addEventListener("change", (e) => uploadList(e.target.files));
 
-  $("#btn-load-type1").addEventListener("click", async () => {
-    if (!selectedFileId) {
-      setStatus("#step2-status", "Chọn một tệp ở bước 1 (radio).", "err");
-      return;
-    }
-    setStatus("#step2-status", "Đang tải type1.json…");
-    const r = await fetch(`/api/type1/${selectedFileId}`);
-    const j = await r.json();
-    if (!r.ok) {
-      setStatus("#step2-status", j.detail || "Chưa có bản lưu", "err");
-      return;
-    }
-    type1Editor.set(j);
-    setStatus("#step2-status", "Đã tải từ máy chủ.", "ok");
-  });
-
   $("#btn-parse").addEventListener("click", async () => {
     if (!selectedFileId) {
       setStatus("#step2-status", "Chọn một tệp ở bước 1 (radio).", "err");
@@ -184,20 +179,29 @@
     const r = await fetch("/api/retrieval/preview", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ type1, document_id: docName || null }),
+      body: JSON.stringify({
+        type1,
+        document_id: docName || null,
+        file_id: selectedFileId || null,
+      }),
     });
     const j = await r.json();
     if (!r.ok) {
       setStatus("#step3-status", j.detail || "Lỗi tách đoạn", "err");
       return;
     }
+    retrievalPreviewUsedSummarize = false;
+    hasChunkTemp = false;
+    retrievalTempOutdated = false;
+    suppressRetrievalChange = true;
     retrievalEditor.set(j);
+    suppressRetrievalChange = false;
     setStatus("#step3-status", `Tạo ${(j.children_chunks || []).length} chunk. Kiểm tra và Lưu.`, "ok");
   });
 
-  $("#btn-save-chunked").addEventListener("click", async () => {
+  $("#btn-summarize").addEventListener("click", async () => {
     if (!selectedFileId) {
-      setStatus("#step3-status", "Chọn tệp ở bước 1.", "err");
+      setStatus("#step3-status", "Chọn tệp ở bước 1 (radio).", "err");
       return;
     }
     let retrieval;
@@ -207,17 +211,67 @@
       setStatus("#step3-status", "Retrieval JSON không hợp lệ: " + e.message, "err");
       return;
     }
+    const n = (retrieval.children_chunks || []).length;
+    if (!n) {
+      setStatus("#step3-status", "Chưa có chunk — hãy «Tách đoạn» trước.", "err");
+      return;
+    }
+    setStatus("#step3-status", `Đang tạo tóm tắt cho ${n} chunk (Ollama)…`);
+    const r = await fetch("/api/retrieval/summarize", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ file_id: selectedFileId, retrieval }),
+    });
+    const j = await r.json();
+    if (!r.ok) {
+      setStatus("#step3-status", j.detail || "Lỗi tóm tắt", "err");
+      return;
+    }
+    retrievalPreviewUsedSummarize = true;
+    hasChunkTemp = true;
+    retrievalTempOutdated = false;
+    suppressRetrievalChange = true;
+    retrievalEditor.set(j);
+    suppressRetrievalChange = false;
+    setStatus(
+      "#step3-status",
+      "Đã ghi file tạm web_indexer/workdir/<id>/chunk_preview_temp.json và cập nhật preview. «Lưu vào data/chunked» để ghi chính thức.",
+      "ok",
+    );
+  });
+
+  $("#btn-save-chunked").addEventListener("click", async () => {
+    if (!selectedFileId) {
+      setStatus("#step3-status", "Chọn tệp ở bước 1.", "err");
+      return;
+    }
+    const useTemp = hasChunkTemp && !retrievalTempOutdated;
+    let payload;
+    if (useTemp) {
+      payload = { file_id: selectedFileId, from_temp: true };
+    } else {
+      let retrieval;
+      try {
+        retrieval = retrievalEditor.get();
+      } catch (e) {
+        setStatus("#step3-status", "Retrieval JSON không hợp lệ: " + e.message, "err");
+        return;
+      }
+      payload = { file_id: selectedFileId, from_temp: false, retrieval };
+    }
     const r = await fetch("/api/chunked/save", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ retrieval, file_id: selectedFileId }),
+      body: JSON.stringify(payload),
     });
     const j = await r.json();
     if (!r.ok) {
       setStatus("#step3-status", j.detail || "Lỗi lưu chunked", "err");
       return;
     }
-    setStatus("#step3-status", "Đã lưu: " + j.path, "ok");
+    hasChunkTemp = false;
+    retrievalTempOutdated = false;
+    setStatus("#step3-status", "Đã lưu chính thức: " + j.path, "ok");
     await refreshRegistry();
   });
 
@@ -227,17 +281,15 @@
       return;
     }
     const url = $("#qdrant-url").value.trim() || null;
-    const collection = $("#qdrant-collection").value.trim() || "legal_chunks";
-    const dry_run = $("#qdrant-dry").checked;
-    setStatus("#step3-status", dry_run ? "Dry-run…" : "Đang mã hoá và upsert Qdrant…");
+    const use_dual = retrievalPreviewUsedSummarize;
+    setStatus("#step3-status", "Đang mã hoá và upsert Qdrant…");
     const r = await fetch("/api/qdrant", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         file_id: selectedFileId,
-        collection,
         qdrant_url: url,
-        dry_run,
+        use_dual,
       }),
     });
     const j = await r.json();
@@ -247,7 +299,7 @@
     }
     setStatus(
       "#step3-status",
-      (dry_run ? "Dry-run: " : "Đã upsert ") + `${j.points} điểm.`,
+      `Đã upsert ${j.points} điểm → ${j.collection} (${j.vectors_mode}).`,
       "ok",
     );
     await refreshRegistry();

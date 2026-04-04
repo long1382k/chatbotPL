@@ -54,7 +54,6 @@
       <p class="hint">Chọn một dòng ở bước 1. Dùng cây JSON bên dưới để thêm / sửa / xoá nút (giống output <code>scripts/run_legal_parser.py</code> / <code>long_parser.parser</code>).</p>
       <div class="row">
         <button type="button" id="btn-parse" class="btn primary">Phân tích cấu trúc</button>
-        <button type="button" id="btn-load-type1" class="btn secondary">Tải JSON đã lưu</button>
         <button type="button" id="btn-save-type1" class="btn">Lưu JSON cấu trúc</button>
       </div>
       <p id="step2-status" class="status"></p>
@@ -66,13 +65,17 @@
       <p class="hint">Tách theo Điều như <code>scripts/type1_to_retrieval_json.py</code>. Kiểm tra payload rồi lưu vào <code>data/chunked</code>.</p>
       <div class="row">
         <button type="button" id="btn-chunk" class="btn primary">Tách đoạn</button>
+        <button type="button" id="btn-summarize" class="btn secondary">Tạo tóm tắt</button>
         <button type="button" id="btn-save-chunked" class="btn">Lưu vào data/chunked</button>
         <button type="button" id="btn-qdrant" class="btn warn">Nhập vào cơ sở dữ liệu</button>
       </div>
+      <p class="hint qdrant-hint">
+        Sau <strong>Tạo tóm tắt</strong>, kết quả được ghi vào <code>web_indexer/workdir/&lt;file_id&gt;/chunk_preview_temp.json</code>
+        và hiển thị ở preview; bấm <strong>Lưu vào data/chunked</strong> để ghi bản chính thức (nếu bạn sửa preview sau tóm tắt, lưu sẽ gửi nội dung đã sửa).
+        Nhập Qdrant: đã tóm tắt trong phiên này → <code>legal_chunks_dual</code>; chỉ tách đoạn → <code>legal_chunks</code>.
+      </p>
       <div class="row qdrant-opts">
         <label>Qdrant URL <input type="text" id="qdrant-url" placeholder="http://localhost:6333" /></label>
-        <label>Collection <input type="text" id="qdrant-collection" value="legal_chunks" /></label>
-        <label class="inline"><input type="checkbox" id="qdrant-dry" /> Dry-run (chỉ mã hoá, không ghi)</label>
       </div>
       <p id="step3-status" class="status"></p>
       <h3>Retrieval JSON (preview)</h3>
