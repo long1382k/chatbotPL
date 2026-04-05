@@ -2,6 +2,8 @@
   const $ = (sel) => document.querySelector(sel);
 
   let selectedFileId = null;
+  /** Dùng để chỉ reset preview khi chuyển sang dòng (file_id) khác, không khi refresh bảng. */
+  let previousSelectedFileId = null;
   /** Bản sao items từ /api/registry (có has_type1_saved). */
   let registryItems = [];
   let type1Editor = null;
@@ -73,6 +75,18 @@
     btn.disabled = !can;
   }
 
+  function resetStep2And3Preview() {
+    if (type1Editor) type1Editor.set({});
+    suppressRetrievalChange = true;
+    if (retrievalEditor) retrievalEditor.set({});
+    suppressRetrievalChange = false;
+    retrievalPreviewUsedSummarize = false;
+    hasChunkTemp = false;
+    retrievalTempOutdated = false;
+    setStatus("#step2-status", "");
+    setStatus("#step3-status", "");
+  }
+
   async function refreshRegistry() {
     const r = await fetch("/api/registry");
     const data = await r.json();
@@ -96,7 +110,12 @@
     }
     tbody.querySelectorAll('input[name="pick"]').forEach((inp) => {
       inp.addEventListener("change", () => {
-        selectedFileId = inp.value;
+        const next = inp.value;
+        if (next !== previousSelectedFileId) {
+          resetStep2And3Preview();
+        }
+        previousSelectedFileId = next;
+        selectedFileId = next;
         updateLoadType1Button();
       });
     });
@@ -106,6 +125,7 @@
       );
       if (keep) keep.checked = true;
     }
+    previousSelectedFileId = selectedFileId;
   }
 
   function escapeHtml(s) {

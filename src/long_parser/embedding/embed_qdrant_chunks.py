@@ -97,6 +97,175 @@ def chunks_to_points_dual(
     return points
 
 
+def _payload_filter_document_id(document_id: str) -> Any:
+    """Filter Qdrant points by payload ``document_id`` (mọi chunk của cùng một văn bản)."""
+    return qm.Filter(
+        must=[
+            qm.FieldCondition(
+                key="document_id",
+                match=qm.MatchValue(value=document_id),
+            ),
+        ],
+    )
+
+
+def count_points_for_document(
+    *,
+    document_id: str,
+    collection: str,
+    qdrant_url: str | None = None,
+) -> int:
+    """Đếm point trong collection có ``payload.document_id`` trùng."""
+    if QdrantClient is None:
+        raise RuntimeError("Install qdrant-client: pip install qdrant-client")
+    url = qdrant_url or os.environ.get("QDRANT_URL", "http://localhost:6333")
+    client = QdrantClient(url=url)
+    if not client.collection_exists(collection):
+        return 0
+    r = client.count(
+        collection_name=collection,
+        count_filter=_payload_filter_document_id(document_id),
+        exact=True,
+    )
+    return int(r.count)
+
+
+def delete_point_by_id(
+    *,
+    point_id: str,
+    collection: str,
+    qdrant_url: str | None = None,
+) -> None:
+    """Xoá đúng một point theo id (``PointIdsList`` — API Qdrant native)."""
+    if QdrantClient is None:
+        raise RuntimeError("Install qdrant-client: pip install qdrant-client")
+    url = qdrant_url or os.environ.get("QDRANT_URL", "http://localhost:6333")
+    client = QdrantClient(url=url)
+    if not client.collection_exists(collection):
+        raise ValueError(f"Collection không tồn tại: {collection}")
+    pid = str(point_id).strip()
+    if not pid:
+        raise ValueError("Thiếu point_id")
+    client.delete(
+        collection_name=collection,
+        points_selector=qm.PointIdsList(points=[pid]),
+    )
+
+
+def delete_document_points(
+    *,
+    document_id: str,
+    collection: str,
+    qdrant_url: str | None = None,
+) -> int:
+    """
+    Xoá mọi point có ``payload.document_id`` trùng (không đụng văn bản khác).
+    Trả về số point đã đếm trước khi xoá (0 nếu collection không tồn tại hoặc không có point).
+    """
+    if QdrantClient is None:
+        raise RuntimeError("Install qdrant-client: pip install qdrant-client")
+    url = qdrant_url or os.environ.get("QDRANT_URL", "http://localhost:6333")
+    client = QdrantClient(url=url)
+    if not client.collection_exists(collection):
+        return 0
+    n = count_points_for_document(document_id=document_id, collection=collection, qdrant_url=url)
+    if n == 0:
+        return 0
+    client.delete(
+        collection_name=collection,
+        points_selector=_payload_filter_document_id(document_id),
+    )
+    return n
+
+
+def _jsonify_for_api(v: Any) -> Any:
+    """Chuyển giá trị payload Qdrant sang kiểu JSON an toàn."""
+    if v is None or isinstance(v, (bool, int, float, str)):
+        return v
+    if isinstance(v, dict):
+        return {str(k): _jsonify_for_api(x) for k, x in v.items()}
+    if isinstance(v, (list, tuple)):
+        return [_jsonify_for_api(x) for x in v]
+    return str(v)
+
+
+def _record_to_plain_dict(rec: Any) -> dict[str, Any]:
+    """Chuyển ``Record`` từ ``client.scroll`` sang dict JSON-friendly (không vector)."""
+    row: dict[str, Any] = {"id": str(rec.id)}
+    pl = getattr(rec, "payload", None)
+    if pl is not None:
+        if isinstance(pl, dict):
+            row["payload"] = _jsonify_for_api(pl)
+        elif hasattr(pl, "items"):
+            row["payload"] = _jsonify_for_api(dict(pl))
+        else:
+            row["payload"] = _jsonify_for_api(pl)
+    return row
+
+
+def scroll_records_for_document(
+    *,
+    document_id: str,
+    collection: str,
+    qdrant_url: str | None = None,
+    limit: int = 10_000,
+    with_payload: bool = True,
+    with_vectors: bool = False,
+) -> list[dict[str, Any]]:
+    """
+    Dùng ``QdrantClient.scroll`` (API native) lọc theo ``payload.document_id``.
+    Trả về danh sách ``{ "id": ..., "payload": ... }`` như bản ghi Qdrant (không gửi vector mặc định).
+    """
+    if QdrantClient is None:
+        raise RuntimeError("Install qdrant-client: pip install qdrant-client")
+    url = qdrant_url or os.environ.get("QDRANT_URL", "http://localhost:6333")
+    client = QdrantClient(url=url)
+    if not client.collection_exists(collection):
+        return []
+    flt = _payload_filter_document_id(document_id)
+    out: list[dict[str, Any]] = []
+    offset: Any = None
+    while len(out) < limit:
+        take = min(256, limit - len(out))
+        batch, next_offset = client.scroll(
+            collection_name=collection,
+            scroll_filter=flt,
+            limit=take,
+            offset=offset,
+            with_payload=with_payload,
+            with_vectors=with_vectors,
+        )
+        if not batch:
+            break
+        for rec in batch:
+            if len(out) >= limit:
+                break
+            out.append(_record_to_plain_dict(rec))
+        offset = next_offset
+        if next_offset is None:
+            break
+    return out
+
+
+def list_point_ids_for_document(
+    *,
+    document_id: str,
+    collection: str,
+    qdrant_url: str | None = None,
+    limit: int = 10_000,
+) -> list[str]:
+    """Chỉ id — dựa trên ``scroll_records_for_document``."""
+    rows = scroll_records_for_document(
+        document_id=document_id,
+        collection=collection,
+        qdrant_url=qdrant_url,
+        limit=limit,
+        with_payload=False,
+        with_vectors=False,
+    )
+    return [str(r["id"]) for r in rows]
+
+
 def _base_payload(doc: dict[str, Any], ch: dict[str, Any], c: dict[str, Any]) -> dict[str, Any]:
     return {
         "chunk_id": ch.get("chunk_id") or "",
@@ -125,10 +294,14 @@ def upsert_retrieval_document(
     vectors_mode: str = "dual",
     batch_size: int = 32,
     dry_run: bool = False,
+    replace_existing_by_document_id: bool = False,
 ) -> int:
     """
     Embed ``doc`` (retrieval JSON with children_chunks) and upsert into Qdrant.
     ``vectors_mode``: ``legacy`` (single vector) or ``dual`` (dense_search + dense_summary).
+    If ``replace_existing_by_document_id`` is True, xoá trước mọi point có cùng
+    ``payload.document_id`` trong collection (tránh sót chunk khi tái index).
+
     Returns number of points written (0 if dry_run or no chunks).
     """
     if SentenceTransformer is None:
@@ -139,6 +312,7 @@ def upsert_retrieval_document(
     chunks = doc.get("children_chunks") or []
     if not chunks:
         return 0
+    doc_id = (doc.get("document_id") or "").strip()
 
     model = SentenceTransformer(model_name)
 
@@ -212,6 +386,11 @@ def upsert_retrieval_document(
                 )
             points = chunks_to_points_dual(doc, chunks, v_s, v_m)
             try:
+                if replace_existing_by_document_id and doc_id and client.collection_exists(collection):
+                    client.delete(
+                        collection_name=collection,
+                        points_selector=_payload_filter_document_id(doc_id),
+                    )
                 client.upsert(collection_name=collection, points=points)
                 return len(points)
             except Exception as e:
@@ -241,6 +420,11 @@ def upsert_retrieval_document(
             vectors_config={vector_name: qm.VectorParams(size=dim, distance=qm.Distance.COSINE)},
         )
     points = chunks_to_points_legacy(doc, chunks, vectors, vector_name)
+    if replace_existing_by_document_id and doc_id and client.collection_exists(collection):
+        client.delete(
+            collection_name=collection,
+            points_selector=_payload_filter_document_id(doc_id),
+        )
     client.upsert(collection_name=collection, points=points)
     return len(points)
 

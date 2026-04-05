@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Qdrant — DB Manager</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <header class="top">
+    <nav class="app-nav" aria-label="Điều hướng chính">
+      <a href="/index" class="app-nav-link">Indexer</a>
+      <a href="/dbmanager" class="app-nav-link active">Qdrant / DB Manager</a>
+    </nav>
+    <h1>Quản lý vector DB (Qdrant)</h1>
+    <p class="sub">Mỗi văn bản được gắn <code>payload.document_id</code> trên mọi point — xoá theo văn bản không ảnh hưởng văn bản khác. Tên hiển thị lấy từ trường <code>title</code> trong file chunked đã lưu.</p>
+  </header>
+
+  <main class="dbm-main">
+    <div class="row dbm-toolbar">
+      <label class="inline">Qdrant URL
+        <input type="text" id="dbm-qdrant-url" class="dbm-input" placeholder="http://localhost:6333" />
+      </label>
+      <button type="button" id="dbm-refresh" class="btn primary">Làm mới danh sách</button>
+    </div>
+    <p id="dbm-status" class="status"></p>
+
+    <table class="files-table dbm-table" id="dbm-table">
+      <thead>
+        <tr>
+          <th>Tiêu đề (title)</th>
+          <th>document_id</th>
+          <th>Collection</th>
+          <th>Points (lần import)</th>
+          <th>Import lúc</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+    <p class="hint dbm-hint">«Xoá Qdrant» xoá mọi point cùng <code>document_id</code> trong collection đó. «Xem points» mở trang chi tiết (danh sách card theo kiểu Qdrant UI): copy id / payload / <code>return_text</code>, xoá từng point.</p>
+  </main>
+
+  <footer class="foot">
+    <span>API: <code>/api/dbmanager/indexed</code> · <code>/api/dbmanager/qdrant/point-ids</code> · <code>/api/dbmanager/qdrant/delete-point</code></span>
+  </footer>
+
+  <script src="/static/dbmanager.js"></script>
+</body>
+</html>

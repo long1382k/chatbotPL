@@ -14,6 +14,7 @@ from typing import Any
 from fastapi import FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.responses import RedirectResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 
@@ -190,18 +191,114 @@ class QdrantBody(BaseModel):
     use_dual: bool = False
 
 
+class DbManagerQdrantDeleteBody(BaseModel):
+    """Xoá mọi point có payload.document_id trùng trong một collection."""
+
+    document_id: str
+    collection: str
+    qdrant_url: str | None = None
+
+
+class QdrantDeleteOnePointBody(BaseModel):
+    """Xoá một point theo id; dùng để đồng bộ registry khi hết point của văn bản."""
+
+    point_id: str
+    collection: str
+    document_id: str
+    qdrant_url: str | None = None
+
+
 # Tên collection cố định (không nhập tay trên UI).
 QDRANT_COLLECTION_LEGACY = "legal_chunks"
 QDRANT_COLLECTION_DUAL = "legal_chunks_dual"
 
 
-@app.get("/", response_class=HTMLResponse)
-async def index(request: Request) -> Any:
-    # Starlette ≥0.28: (request, name[, context]); old (name, {request}) breaks on newer Jinja2/Starlette.
+def _read_title_from_chunked_rel(rel: str | None) -> str:
+    if not rel:
+        return ""
+    p = ROOT / rel
+    if not p.is_file():
+        return ""
+    try:
+        with open(p, encoding="utf-8") as f:
+            doc = json.load(f)
+        return (doc.get("title") or "").strip()
+    except Exception:
+        return ""
+
+
+def _sync_registry_qdrant_point_count(
+    registry: dict[str, Any], document_id: str, collection: str, remaining: int
+) -> None:
+    """Cập nhật ``qdrant_points`` hoặc xoá trạng thái Qdrant khi ``remaining == 0``."""
+    for ent in registry.get("items", []):
+        if (ent.get("chunked_document_id") or "") != document_id:
+            continue
+        if not ent.get("qdrant_imported_at"):
+            continue
+        coll_ent = ent.get("qdrant_collection")
+        if coll_ent is not None and coll_ent != collection:
+            continue
+        if remaining <= 0:
+            ent["qdrant_imported_at"] = None
+            ent["qdrant_points"] = None
+            ent.pop("qdrant_collection", None)
+            ent.pop("qdrant_vectors_mode", None)
+        else:
+            ent["qdrant_points"] = remaining
+
+
+def _clear_qdrant_registry_for_document(
+    registry: dict[str, Any], document_id: str, collection: str
+) -> None:
+    """Chỉ xoá trạng thái Qdrant trên registry khi đúng collection vừa xoá trên server."""
+    for ent in registry.get("items", []):
+        if (ent.get("chunked_document_id") or "") != document_id:
+            continue
+        if not ent.get("qdrant_imported_at"):
+            continue
+        coll_ent = ent.get("qdrant_collection")
+        if coll_ent is not None and coll_ent != collection:
+            continue
+        ent["qdrant_imported_at"] = None
+        ent["qdrant_points"] = None
+        ent.pop("qdrant_collection", None)
+        ent.pop("qdrant_vectors_mode", None)
+
+
+@app.get("/")
+async def root_redirect() -> RedirectResponse:
+    return RedirectResponse(url="/index", status_code=307)
+
+
+@app.get("/index", response_class=HTMLResponse)
+async def index_page(request: Request) -> Any:
     return templates.TemplateResponse(
         request=request,
         name="index.html",
         context={},
+    )
+
+
+@app.get("/dbmanager", response_class=HTMLResponse)
+async def dbmanager_page(request: Request) -> Any:
+    return templates.TemplateResponse(
+        request=request,
+        name="dbmanager.html",
+        context={},
+    )
+
+
+@app.get("/dbmanager/points/{document_id}", response_class=HTMLResponse)
+async def dbmanager_points_page(request: Request, document_id: str) -> Any:
+    collection = (request.query_params.get("collection") or "").strip()
+    return templates.TemplateResponse(
+        request=request,
+        name="dbmanager_points.html",
+        context={
+            "document_id": document_id,
+            "collection": collection,
+        },
     )
 
 
@@ -473,6 +570,7 @@ async def qdrant_upsert(body: QdrantBody) -> JSONResponse:
             collection=collection,
             vectors_mode="dual" if use_dual else "legacy",
             dry_run=False,
+            replace_existing_by_document_id=True,
         )
     except Exception as e:
         if body.file_id:
@@ -500,6 +598,182 @@ async def qdrant_upsert(body: QdrantBody) -> JSONResponse:
             "points": n,
             "collection": collection,
             "vectors_mode": "dual" if use_dual else "legacy",
+        }
+    )
+
+
+@app.get("/api/dbmanager/indexed")
+async def dbmanager_list_indexed() -> JSONResponse:
+    """Các dòng registry đã upsert Qdrant; title đọc từ file chunked."""
+    data = _load_registry()
+    rows: list[dict[str, Any]] = []
+    for it in data.get("items", []):
+        if not it.get("qdrant_imported_at"):
+            continue
+        rel = it.get("chunked_rel_path")
+        title = _read_title_from_chunked_rel(rel)
+        rows.append(
+            {
+                "file_id": it.get("file_id"),
+                "document_id": it.get("chunked_document_id") or "",
+                "title": title,
+                "title_fallback": (it.get("original_filename") or ""),
+                "chunked_rel_path": rel,
+                "qdrant_imported_at": it.get("qdrant_imported_at"),
+                "qdrant_points": it.get("qdrant_points"),
+                "qdrant_collection": it.get("qdrant_collection"),
+                "qdrant_vectors_mode": it.get("qdrant_vectors_mode"),
+            }
+        )
+    return JSONResponse({"items": rows})
+
+
+@app.get("/api/dbmanager/qdrant/count")
+async def dbmanager_qdrant_count(
+    document_id: str,
+    collection: str,
+    qdrant_url: str | None = None,
+) -> JSONResponse:
+    try:
+        from long_parser.embedding.embed_qdrant_chunks import count_points_for_document
+    except ImportError as e:
+        raise HTTPException(status_code=500, detail=str(e)) from e
+    try:
+        n = count_points_for_document(
+            document_id=document_id,
+            collection=collection,
+            qdrant_url=qdrant_url,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e)) from e
+    return JSONResponse({"document_id": document_id, "collection": collection, "count": n})
+
+
+@app.get("/api/dbmanager/qdrant/point-ids")
+async def dbmanager_qdrant_point_ids(
+    document_id: str,
+    collection: str,
+    qdrant_url: str | None = None,
+    limit: int = 5000,
+) -> JSONResponse:
+    """Dữ liệu từ ``QdrantClient.scroll`` (id + payload), kèm ``point_ids`` để tương thích."""
+    try:
+        from long_parser.embedding.embed_qdrant_chunks import (
+            count_points_for_document,
+            scroll_records_for_document,
+        )
+    except ImportError as e:
+        raise HTTPException(status_code=500, detail=str(e)) from e
+    lim = max(1, min(limit, 20_000))
+    try:
+        total_matching = count_points_for_document(
+            document_id=document_id,
+            collection=collection,
+            qdrant_url=qdrant_url,
+        )
+        records = scroll_records_for_document(
+            document_id=document_id,
+            collection=collection,
+            qdrant_url=qdrant_url,
+            limit=lim,
+            with_payload=True,
+            with_vectors=False,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e)) from e
+    ids = [str(r.get("id", "")) for r in records]
+    truncated = total_matching > len(records)
+    return JSONResponse(
+        {
+            "document_id": document_id,
+            "collection": collection,
+            "records": records,
+            "point_ids": ids,
+            "total_matching": total_matching,
+            "returned": len(records),
+            "truncated": truncated,
+        }
+    )
+
+
+@app.post("/api/dbmanager/qdrant/delete-by-document")
+async def dbmanager_qdrant_delete(body: DbManagerQdrantDeleteBody) -> JSONResponse:
+    doc_id = (body.document_id or "").strip()
+    if not doc_id:
+        raise HTTPException(status_code=400, detail="Thiếu document_id")
+    coll = (body.collection or "").strip()
+    if coll not in (QDRANT_COLLECTION_LEGACY, QDRANT_COLLECTION_DUAL):
+        raise HTTPException(
+            status_code=400,
+            detail=f"collection phải là {QDRANT_COLLECTION_LEGACY} hoặc {QDRANT_COLLECTION_DUAL}",
+        )
+    try:
+        from long_parser.embedding.embed_qdrant_chunks import delete_document_points
+    except ImportError as e:
+        raise HTTPException(status_code=500, detail=str(e)) from e
+    try:
+        removed = delete_document_points(
+            document_id=doc_id,
+            collection=coll,
+            qdrant_url=body.qdrant_url,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e)) from e
+    registry = _load_registry()
+    _clear_qdrant_registry_for_document(registry, doc_id, coll)
+    _save_registry(registry)
+    return JSONResponse(
+        {
+            "ok": True,
+            "document_id": doc_id,
+            "collection": coll,
+            "removed_points": removed,
+        }
+    )
+
+
+@app.post("/api/dbmanager/qdrant/delete-point")
+async def dbmanager_delete_one_point(body: QdrantDeleteOnePointBody) -> JSONResponse:
+    doc_id = (body.document_id or "").strip()
+    pid = (body.point_id or "").strip()
+    coll = (body.collection or "").strip()
+    if not doc_id or not pid:
+        raise HTTPException(status_code=400, detail="Thiếu document_id hoặc point_id")
+    if coll not in (QDRANT_COLLECTION_LEGACY, QDRANT_COLLECTION_DUAL):
+        raise HTTPException(
+            status_code=400,
+            detail=f"collection phải là {QDRANT_COLLECTION_LEGACY} hoặc {QDRANT_COLLECTION_DUAL}",
+        )
+    try:
+        from long_parser.embedding.embed_qdrant_chunks import (
+            count_points_for_document,
+            delete_point_by_id,
+        )
+    except ImportError as e:
+        raise HTTPException(status_code=500, detail=str(e)) from e
+    try:
+        delete_point_by_id(point_id=pid, collection=coll, qdrant_url=body.qdrant_url)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e)) from e
+    try:
+        remaining = count_points_for_document(
+            document_id=doc_id,
+            collection=coll,
+            qdrant_url=body.qdrant_url,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e)) from e
+    registry = _load_registry()
+    _sync_registry_qdrant_point_count(registry, doc_id, coll, remaining)
+    _save_registry(registry)
+    return JSONResponse(
+        {
+            "ok": True,
+            "point_id": pid,
+            "collection": coll,
+            "remaining_for_document": remaining,
         }
     )
 

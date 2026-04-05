@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Points — DB Manager</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body
+  class="dbm-points-page"
+  data-document-id="{{ document_id | e }}"
+  data-collection="{{ collection | e }}"
+>
+  <header class="top">
+    <nav class="app-nav" aria-label="Điều hướng chính">
+      <a href="/index" class="app-nav-link">Indexer</a>
+      <a href="/dbmanager" class="app-nav-link">Qdrant / DB Manager</a>
+      <span class="app-nav-link active" aria-current="page">Points</span>
+    </nav>
+    <h1 id="dbm-pt-title">Points trong Qdrant</h1>
+    <p class="sub" id="dbm-pt-sub">Đang tải…</p>
+  </header>
+
+  <main class="dbm-points-main">
+    <div id="dbm-pt-missing" class="dbm-pt-missing" hidden>
+      <p>Thiếu tham số <code>collection</code> trên URL. Quay lại <a href="/dbmanager">danh sách văn bản</a> và bấm «Xem point».</p>
+    </div>
+
+    <div id="dbm-pt-body" hidden>
+      <div class="dbm-tabs" role="tablist" aria-label="Qdrant (giao diện tham khảo)">
+        <span class="dbm-tab dbm-tab-active" aria-current="page">Points</span>
+        <span class="dbm-tab dbm-tab-disabled">Info</span>
+        <span class="dbm-tab dbm-tab-disabled">Optimizations</span>
+      </div>
+
+      <div class="row dbm-toolbar dbm-pt-toolbar">
+        <label class="inline">Qdrant URL
+          <input type="text" id="dbm-qdrant-url" class="dbm-input" placeholder="http://localhost:6333" />
+        </label>
+        <button type="button" id="dbm-pt-refresh" class="btn primary">Làm mới</button>
+        <a href="/dbmanager" class="btn secondary">← Danh sách văn bản</a>
+      </div>
+      <p id="dbm-pt-status" class="status"></p>
+      <p id="dbm-pt-trunc" class="hint dbm-pt-trunc" hidden></p>
+      <div id="dbm-pt-list" class="dbm-pt-list"></div>
+    </div>
+  </main>
+
+  <footer class="foot">
+    <span>Dữ liệu: <code>QdrantClient.scroll</code> lọc theo <code>document_id</code> · Xoá point: <code>PointIdsList</code></span>
+  </footer>
+
+  <script src="/static/dbmanager_points.js"></script>
+</body>
+</html>
