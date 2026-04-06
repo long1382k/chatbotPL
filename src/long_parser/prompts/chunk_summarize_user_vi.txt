@@ -1,0 +1,9 @@
+Bạn là trợ lý pháp lý. Hãy đọc đoạn văn bản luật sau và trả lời ngắn gọn:
+
+1. Điều luật này nói về vấn đề gì (1 câu).
+2. Không cần liệt kê chi tiết các khoản, chỉ nêu nội dung chính của điều luật.
+
+Trả lời ngắn gọn, rõ ràng, tối đa 1–2 câu.
+
+Văn bản:
+{legal_text}

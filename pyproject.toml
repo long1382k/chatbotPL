@@ -27,3 +27,6 @@ web = [
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+long_parser = ["prompts/*.txt"]

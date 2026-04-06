@@ -14,26 +14,17 @@ import urllib.error
 import urllib.request
 from typing import Any, Optional
 
+from long_parser.ollama_util import normalize_ollama_base
+from long_parser.prompt_util import load_prompt
 from long_parser.retrieval.legal_retrieve import DEFAULT_MODEL, LegalRetriever
 
 # Tunable default: how many retrieved chunks are passed into the LLM context
 DEFAULT_CONTEXT_TOP_K = 10
 
-
-def _normalize_ollama_base(raw: str) -> str:
-    s = raw.strip().rstrip("/")
-    if s.startswith("http://") or s.startswith("https://"):
-        return s
-    return f"http://{s}"
-
-
-DEFAULT_OLLAMA_URL = _normalize_ollama_base(os.environ.get("OLLAMA_HOST", "127.0.0.1:11434"))
+DEFAULT_OLLAMA_URL = normalize_ollama_base(os.environ.get("OLLAMA_HOST", "127.0.0.1:11434"))
 DEFAULT_OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "qwen2.5:7b-instruct")
 
-SYSTEM_PROMPT_VI = """Bạn là trợ lý tra cứu văn bản pháp luật Việt Nam.
-Chỉ trả lời dựa trên ngữ cảnh được cung cấp dưới dạng các đoạn trích [1], [2], ...
-Nếu ngữ cảnh không đủ để trả lời chính xác, hãy nói rõ là không có đủ thông tin trong tài liệu đã trích.
-Trích dẫn ý chính có thể tham chiếu số thứ tự đoạn [n] khi phù hợp."""
+LEGAL_RAG_SYSTEM_VI = load_prompt("legal_rag_system_vi.txt")
 
 
 def format_context_from_chunks(
@@ -138,7 +129,7 @@ def run_rag(
         f"Câu hỏi: {query.strip()}"
     )
     messages = [
-        {"role": "system", "content": SYSTEM_PROMPT_VI},
+        {"role": "system", "content": LEGAL_RAG_SYSTEM_VI},
         {"role": "user", "content": user_content},
     ]
     answer = ollama_chat(
@@ -199,7 +190,7 @@ def main() -> None:
     ap.add_argument(
         "--ollama-model",
         default=DEFAULT_OLLAMA_MODEL,
-        help="Tên model Ollama (mặc định OLLAMA_MODEL hoặc qwen3.5:7b-instruct)",
+        help="Tên model Ollama (mặc định OLLAMA_MODEL hoặc qwen2.5:7b-instruct)",
     )
     ap.add_argument("--ollama-timeout", type=float, default=300.0)
     ap.add_argument(

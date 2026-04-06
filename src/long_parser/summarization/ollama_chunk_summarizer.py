@@ -15,23 +15,11 @@ import urllib.error
 import urllib.request
 from typing import Any
 
+from long_parser.ollama_util import normalize_ollama_base
+from long_parser.prompt_util import load_prompt
 
-USER_PROMPT_TEMPLATE = """Bạn là trợ lý pháp lý. Hãy đọc đoạn văn bản luật sau và trả lời ngắn gọn:
-
-1. Điều luật này nói về vấn đề gì (1 câu).
-2. Không cần liệt kê chi tiết các khoản, chỉ nêu nội dung chính của điều luật.
-
-Trả lời ngắn gọn, rõ ràng, tối đa 1–2 câu.
-
-Văn bản:
-{legal_text}"""
-
-
-def _normalize_ollama_base(raw: str) -> str:
-    s = raw.strip().rstrip("/")
-    if s.startswith("http://") or s.startswith("https://"):
-        return s
-    return f"http://{s}"
+CHUNK_SUMMARIZE_SYSTEM_VI = load_prompt("chunk_summarize_system_vi.txt")
+CHUNK_SUMMARIZE_USER_VI = load_prompt("chunk_summarize_user_vi.txt")
 
 
 def _chat_complete(
@@ -53,10 +41,7 @@ def _chat_complete(
         {
             "model": model,
             "messages": [
-                {
-                    "role": "system",
-                    "content": "Bạn tóm tắt văn bản pháp luật tiếng Việt chính xác, trung tính, không bịa đặt.",
-                },
+                {"role": "system", "content": CHUNK_SUMMARIZE_SYSTEM_VI},
                 {"role": "user", "content": user_content},
             ],
             "stream": False,
@@ -127,7 +112,7 @@ def ensure_chunk_summaries(
     if not isinstance(chunks, list) or not chunks:
         return 0
 
-    ollama_base = _normalize_ollama_base(
+    ollama_base = normalize_ollama_base(
         base_url or os.environ.get("OLLAMA_HOST", "127.0.0.1:11434")
     )
     ollama_model = model or os.environ.get("OLLAMA_MODEL", "qwen2.5:7b-instruct")
@@ -144,7 +129,7 @@ def ensure_chunk_summaries(
             c["summary"] = ""
             continue
 
-        user_msg = USER_PROMPT_TEMPLATE.format(legal_text=legal_text)
+        user_msg = CHUNK_SUMMARIZE_USER_VI.format(legal_text=legal_text)
 
         def call() -> str:
             return _chat_complete(
